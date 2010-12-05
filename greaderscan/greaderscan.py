@@ -49,7 +49,7 @@ DEBUG = 0
 
 google_url = 'http://www.google.com'
 reader_url = google_url + '/reader'
-login_url = 'https://www.google.com/accounts/ClientLogin'
+auth_url = 'https://www.google.com/accounts/ClientLogin'
 opml_url = reader_url + '/subscriptions/export'
 token_url = reader_url + '/api/0/token'
 subscription_list_url = reader_url + '/api/0/subscription/list'
@@ -60,16 +60,15 @@ starred_url = reader_url + '/atom/user/-/state/com.google/starred'
 subscription_url = reader_url + '/api/0/subscription/edit'
 get_feed_url = reader_url + '/atom/feed/'
 
-def get_SID():
-	result = ""
-	header = {'User-agent' : SOURCE}
-	post_data = urllib.urlencode({ 'Email': LOGIN, 'Passwd': PASSWORD, 'service': 'reader', 'source': SOURCE, 'continue': google_url, })
-	request = urllib2.Request(login_url, post_data, header)
+def get_AUTH():
+	auth_resp = ""
+	request = urllib2.Request(auth_url, data=urllib.urlencode({'Email': LOGIN, 'Passwd': PASSWORD, 'service': 'reader'}))
 
 	try:
-		f = urllib2.urlopen( request )
-		result = f.read()    
-		return re.search('SID=(\S*)', result).group(1)
+		auth_resp = urllib2.urlopen( request )
+		auth_resp_content = auth_resp.read()    
+		auth_resp_dict = dict(x.split('=') for x in auth_resp_content.split('\n') if x)
+		return auth_resp_dict["Auth"]
 
 	except (KeyboardInterrupt, SystemExit):
 		raise
@@ -80,12 +79,9 @@ def get_SID():
 		
 
 #get results from url
-def get_results(SID, url):
+def get_results(AUTH, url):
 	result = ""
-	header = {'User-agent' : SOURCE}
-	header['Cookie']='Name=SID;SID=%s;Domain=.google.com;Path=/;Expires=160000000000' % SID
-
-	request = urllib2.Request(url, None, header)
+	request = urllib2.Request(url, None, {'Authorization': 'GoogleLogin auth=%s' % AUTH})
 
 	try:
 		f = urllib2.urlopen( request )
@@ -100,51 +96,51 @@ def get_results(SID, url):
 	return result
 
 #get a token, this is needed for modifying to reader
-def get_token(SID):
-	return get_results(SID, token_url)
+def get_token(AUTH):
+	return get_results(AUTH, token_url)
 
 #get a specific feed.  It works for any feed, subscribed or not
-def get_feed(SID, url):
-	return get_results(SID, get_feed_url + url.encode('utf-8'))
+def get_feed(AUTH, url):
+	return get_results(AUTH, get_feed_url + url.encode('utf-8'))
 
 #get a list of the users subscribed feeds
-def get_subscription_list(SID):
-	return get_results(SID, subscription_list_url)
+def get_subscription_list(AUTH):
+	return get_results(AUTH, subscription_list_url)
 
 #get a feed of the users unread items
-def get_reading_list(SID):
-	return get_results(SID, reading_url)
+def get_reading_list(AUTH):
+	return get_results(AUTH, reading_url)
 
 #get a copy of the OPML export
-def get_OPML(SID):
-	return get_results(SID, opml_url)
+def get_OPML(AUTH):
+	return get_results(AUTH, opml_url)
 
 #get a feed of the users read items
-def get_read_items(SID):
-	return get_results(SID, read_items_url)
+def get_read_items(AUTH):
+	return get_results(AUTH, read_items_url)
 
 #get a feed of the users unread items of a given tag
-def get_reading_tag_list(SID, tag):
+def get_reading_tag_list(AUTH, tag):
 	tagged_url = reading_tag_url % tag
-	return get_results(SID, tagged_url.encode('utf-8'))
+	return get_results(AUTH, tagged_url.encode('utf-8'))
 
 #get a feed of a users starred items/feeds
-def get_starred(SID):
-	return get_results(SID, starred_url)
+def get_starred(AUTH):
+	return get_results(AUTH, starred_url)
 
 #subscribe of unsubscribe to a feed
-def modify_subscription(SID, what, do):
+def modify_subscription(AUTH, what, do):
 	url = subscription_url + '?client=client:%s&ac=%s&s=%s&token=%s' % ( login, do.encode('utf-8'), 'feed%2F' + what.encode('utf-8'), get_token(SID) )
 	print url
-	return get_results(SID, url)
+	return get_results(AUTH, url)
 
 #subscribe to a feed
-def subscribe_to(SID, url):
-	return modify_subscription(SID, url, 'subscribe')
+def subscribe_to(AUTH, url):
+	return modify_subscription(AUTH, url, 'subscribe')
 
 #unsubscribe to a feed
-def unsubscribe_from(SID, url):
-	return modify_subscription(SID, url, 'unsubscribe')
+def unsubscribe_from(AUTH, url):
+	return modify_subscription(AUTH, url, 'unsubscribe')
 
 def mywrite(str):
 	global VERBOSE, OUTPUT
@@ -155,7 +151,7 @@ def mywrite(str):
 	if OUTPUT:
 		OUTPUT.write(unicode(str).encode("utf-8") + "\n")
 
-def check_feeds(SID, dt, parsed_opml):
+def check_feeds(AUTH, dt, parsed_opml):
 	global OLDEST, DEBUG
 	
 	for item in parsed_opml:
@@ -214,7 +210,7 @@ def check_feeds(SID, dt, parsed_opml):
 					mywrite("UNKNOWN ERROR  -- Manual review required on %s (%s)" % (f_url, sys.exc_info()[0]))
 		else:
 			# item is a container (label or tag), recurse
-			check_feeds(SID, dt, item)
+			check_feeds(AUTH, dt, item)
 
 def main():
 	global LOGIN, PASSWORD, VERBOSE, OUTPUT, OLDEST, DEBUG
@@ -254,8 +250,8 @@ def main():
 	if not OUTPUT:
 		VERBOSE = 1
 
-	SID = get_SID()
-	check_feeds(SID, datetime.date.today(), opml.from_string(get_OPML(SID)))
+	AUTH = get_AUTH()
+	check_feeds(AUTH, datetime.date.today(), opml.from_string(get_OPML(AUTH)))
 	
 	if OUTPUT:
 		OUTPUT.close()
